@@ -1,0 +1,295 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>P2P Social Feed</title>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+<style>
+body{margin:0;background:#0b0b0b;color:#eee;font-family:sans-serif}
+.app{display:grid;grid-template-columns:260px 1fr 320px;height:100vh}
+.left,.right{background:#111;padding:15px;overflow:auto}
+.left{border-right:1px solid #222}
+.right{border-left:1px solid #222}
+.center{padding:15px;overflow:auto}
+
+textarea,input,select{
+  width:100%;padding:10px;background:#222;color:#eee;
+  border:1px solid #333;margin-top:5px;border-radius:5px
+}
+button{
+  width:100%;padding:10px;background:#2d6cff;
+  border:none;color:white;margin-top:5px;border-radius:5px;cursor:pointer
+}
+.post{background:#1a1a1a;padding:10px;margin-top:10px;border-radius:6px}
+.user{color:#6cf;font-weight:bold}
+.small{font-size:.7em;color:#888}
+.like,.reply,.tag,.vote{cursor:pointer;color:#ff6c6c;margin-left:6px}
+.box{background:#1a1a1a;padding:8px;border-radius:5px;margin-top:5px}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+<!-- LEFT PANEL -->
+<div class="left">
+  <h3>👤 Profile</h3>
+  <b>User:</b> <span id="username"></span>
+  <h4>Peer ID</h4>
+  <div id="myid" class="box"></div>
+
+  <h3>🌐 Connect</h3>
+  <input id="peerid" placeholder="Peer ID">
+  <button onclick="connect()">Connect</button>
+
+  <h3>💾 Profile</h3>
+  <button onclick="downloadProfile()">Export</button>
+  <input type="file" onchange="importProfile(event)">
+
+  <h3>⏰ Time</h3>
+  <div id="clock" class="box"></div>
+
+  <div id="status"></div>
+</div>
+
+<!-- CENTER -->
+<div class="center">
+  <h2>🕊️ EchoNet</h2>
+  <input id="tagSearch" placeholder="🔎 Search by #hashtag" oninput="render()">
+  <div id="feed"></div>
+</div>
+
+<!-- RIGHT -->
+<div class="right">
+  <h3>✍️ New Post</h3>
+  <textarea id="msg" placeholder="Write something... #tag"></textarea>
+  <button onclick="post()">Post</button>
+
+  <h3>📊 Sort</h3>
+  <select id="sort" onchange="render()">
+    <option value="latest">Latest</option>
+    <option value="popular">Popular</option>
+  </select>
+</div>
+
+</div>
+
+<script>
+/* ---------------------------
+   SECURITY & SETTINGS
+----------------------------*/
+let clientID = localStorage.getItem("clientID");
+if(!clientID){ clientID = crypto.randomUUID(); localStorage.setItem("clientID", clientID); }
+
+let lastPostTime = 0;
+let lastLikeTimes = [];
+const bannedWords = [];
+function validText(text){ const t = text.toLowerCase(); return !bannedWords.some(w => t.includes(w)); }
+
+/* ---------------------------
+   CLOCK
+----------------------------*/
+setInterval(()=>document.getElementById("clock").innerText=new Date().toLocaleTimeString(),1000);
+
+/* ---------------------------
+   HASHTAGS
+----------------------------*/
+function extractTags(text){ return (text.match(/#[a-zA-Z0-9_äöüÄÖÜß]+/g)||[]).map(t=>t.toLowerCase()); }
+function searchTag(tag){ document.getElementById("tagSearch").value=tag; render(); }
+
+/* ---------------------------
+   P2P SETUP
+----------------------------*/
+const peer = new Peer();
+const connections = [];
+let feed = [];
+let knownPeers = new Set();
+let likeMap = {};
+
+let profile = { user: prompt("Username:") || "User"+Math.floor(Math.random()*1000) };
+document.getElementById("username").innerText = profile.user;
+
+peer.on("open", id=>{ document.getElementById("myid").innerText=id; knownPeers.add(id); });
+peer.on("connection", conn=>setupConnection(conn));
+
+function connect(){
+  const id=document.getElementById("peerid").value;
+  const conn=peer.connect(id);
+  setupConnection(conn);
+}
+
+function setupConnection(conn){
+  conn.on("open", ()=>{
+    connections.push(conn);
+    knownPeers.add(conn.peer);
+    conn.send({type:"sync", data:feed});
+    updateStatus();
+  });
+  conn.on("data", msg=>{
+    if(!msg||!msg.type) return;
+
+    if(msg.type==="sync") msg.data.forEach(addPost);
+    if(msg.type==="post"){ if(validText(msg.data.text)) addPost(msg.data); }
+    if(msg.type==="like"){
+      if(!likeMap[msg.postId]) likeMap[msg.postId]=new Set();
+      if(!likeMap[msg.postId].has(msg.clientID)){
+        likeMap[msg.postId].add(msg.clientID);
+        const p=feed.find(x=>x.id===msg.postId);
+        if(p) p.likes = likeMap[msg.postId].size;
+      }
+    }
+    if(msg.type==="vote"){
+      const s = feed.find(x => x.id===msg.surveyID);
+      if(!s||!s.options) return;
+      if(!s.votes) s.votes={};
+      if(s.votes[msg.clientID]===undefined) s.votes[msg.clientID]=msg.optionIndex;
+    }
+    render();
+  });
+  conn.on("close",updateStatus);
+}
+
+function broadcast(msg){ connections.forEach(c=>{if(c.open)c.send(msg);}); }
+function updateStatus(){ document.getElementById("status").innerText="Peers: "+knownPeers.size; }
+
+/* ---------------------------
+   POSTS + SURVEYS
+----------------------------*/
+function post(parent=null){
+  const now = Date.now();
+  if(now - lastPostTime < 10000){ alert("Wait a few seconds before posting again."); return; }
+  const txt=document.getElementById("msg").value.trim();
+  if(!txt||!validText(txt)){ alert("Post blocked by content filter."); return; }
+  lastPostTime = now;
+
+  // Umfrage-Erkennung: jede Zeile mit ● = Option
+  let lines = txt.split("\n").map(l=>l.trim()).filter(l=>l);
+  let options = null;
+  if(lines.every(l=>l.startsWith("●")) && lines.length>=2){
+    options = lines.map(l=>l.replace(/^●\s*/,""));
+  }
+
+  const p = {
+    id: crypto.randomUUID(),
+    text: txt,
+    time: now,
+    likes: 0,
+    parent: parent,
+    user: profile.user,
+    tags: extractTags(txt),
+    options: options,
+    votes: {}
+  };
+
+  document.getElementById("msg").value="";
+  addPost(p);
+  broadcast({type:"post", data:p});
+  render();
+}
+
+function reply(id){
+  const txt=prompt("Reply:");
+  if(!txt||!validText(txt)) return;
+  const p={id:crypto.randomUUID(), text:txt, time:Date.now(), likes:0, parent:id,
+           user:profile.user, tags:extractTags(txt)};
+  addPost(p);
+  broadcast({type:"post", data:p});
+  render();
+}
+
+/* ---------------------------
+   LIKES
+----------------------------*/
+function like(id){
+  const now = Date.now();
+  lastLikeTimes = lastLikeTimes.filter(t => now - t < 60000);
+  if(lastLikeTimes.length>10){ alert("Like rate limit reached."); return; }
+  lastLikeTimes.push(now);
+
+  if(!likeMap[id]) likeMap[id]=new Set();
+  if(likeMap[id].has(clientID)) return;
+  likeMap[id].add(clientID);
+
+  const p=feed.find(x=>x.id===id); if(p) p.likes = likeMap[id].size;
+  broadcast({type:"like", postId:id, clientID});
+  render();
+}
+
+/* ---------------------------
+   VOTING
+----------------------------*/
+function vote(surveyID, optionIndex){
+  const s = feed.find(x => x.id===surveyID);
+  if(!s||!s.options) return;
+  if(!s.votes) s.votes={};
+  if(s.votes[clientID]!==undefined) return;
+  s.votes[clientID] = optionIndex;
+  broadcast({type:"vote", surveyID, clientID, optionIndex});
+  render();
+}
+
+/* ---------------------------
+   FEED
+----------------------------*/
+function addPost(p){ if(!feed.find(x=>x.id===p.id)) feed.push(p); }
+
+/* ---------------------------
+   RENDER
+----------------------------*/
+function render(){
+  const f=document.getElementById("feed");
+  f.innerHTML="";
+
+  const searchTags = extractTags(document.getElementById("tagSearch").value);
+  let roots=feed.filter(p=>!p.parent);
+
+  if(searchTags.length) roots = roots.filter(p=>searchTags.every(t=>p.tags.includes(t)));
+
+  if(document.getElementById("sort").value==="popular") roots.sort((a,b)=>b.likes-a.likes);
+  else roots.sort((a,b)=>b.time-a.time);
+
+  roots.forEach(p=>f.appendChild(renderPost(p,0)));
+}
+
+function renderPost(p,level){
+  const d=document.createElement("div");
+  d.className="post";
+  d.style.marginLeft=(level*20)+"px";
+
+  let html = `<span class="user">${p.user}</span>: ${p.text}<br>`;
+
+  // Umfrage-Optionen
+  if(p.options){
+    let totalVotes = Object.keys(p.votes||{}).length;
+    p.options.forEach((opt,i)=>{
+      const count = Object.values(p.votes||{}).filter(v=>v===i).length;
+      const pct = totalVotes ? Math.round((count/totalVotes)*100) : 0;
+      html += `<div>${opt} - ${count} votes (${pct}%) 
+                <button class="vote" onclick="vote('${p.id}',${i})">Vote</button></div>`;
+    });
+  }
+
+  // Likes + Reply (immer sichtbar)
+  html += `<div class="small">
+    ${new Date(p.time).toLocaleString()} · ❤️ ${p.likes}
+    <span class="like" onclick="like('${p.id}')">Like</span>
+    <span class="reply" onclick="reply('${p.id}')">Reply</span>
+  </div>`;
+
+  d.innerHTML = html;
+
+  // Render Kommentare rekursiv
+  feed.filter(x=>x.parent===p.id)
+      .sort((a,b)=>a.time-b.time)
+      .forEach(c=>d.appendChild(renderPost(c,level+1)));
+
+  return d;
+}
+
+render();
+</script>
+</body>
+</html>
+
