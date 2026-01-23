@@ -142,34 +142,68 @@ function setupConnection(conn){
     conn.send({type:"sync", data:feed});
     updateStatus();
   });
-  conn.on("data", msg=>{
-    if(!msg||!msg.type) return;
 
-    if(msg.type==="sync") msg.data.forEach(addPost);
-    if(msg.type==="post"){
-      if(validText(msg.data.text)) addPost(msg.data);
-    }
-    if(msg.type==="like"){
-      if(!likeMap[msg.postId]) likeMap[msg.postId]=new Set();
-      if(!likeMap[msg.postId].has(msg.clientID)){
-        likeMap[msg.postId].add(msg.clientID);
-        const p=feed.find(x=>x.id===msg.postId);
-        if(p) p.likes = likeMap[msg.postId].size;
+  conn.on("data", msg => {
+    if (!msg || !msg.type) return;
+
+    // POST weiterleiten
+    if (msg.type === "post") {
+      if (!feed.find(x => x.id === msg.data.id)) {
+        addPost(msg.data);
+        broadcastExcept(conn, msg);
       }
     }
-    if(msg.type==="vote"){
-      const s = feed.find(x => x.id===msg.surveyID);
-      if(!s||!s.options) return;
-      if(!s.votes) s.votes={};
-      if(s.votes[msg.clientID]===undefined) s.votes[msg.clientID]=msg.optionIndex;
+
+    // SYNC
+    if (msg.type === "sync") {
+      msg.data.forEach(p => {
+        if (!feed.find(x => x.id === p.id)) {
+          addPost(p);
+        }
+      });
     }
+
+    // LIKE weiterleiten
+    if (msg.type === "like") {
+      if (!likeMap[msg.postId]) likeMap[msg.postId] = new Set();
+      if (!likeMap[msg.postId].has(msg.clientID)) {
+        likeMap[msg.postId].add(msg.clientID);
+        const p = feed.find(x => x.id === msg.postId);
+        if (p) p.likes = likeMap[msg.postId].size;
+
+        broadcastExcept(conn, msg);
+      }
+    }
+
+    // VOTE weiterleiten
+    if (msg.type === "vote") {
+      const s = feed.find(x => x.id === msg.surveyID);
+      if (s && s.options) {
+        if (!s.votes) s.votes = {};
+        if (s.votes[msg.clientID] === undefined) {
+          s.votes[msg.clientID] = msg.optionIndex;
+
+          broadcastExcept(conn, msg);
+        }
+      }
+    }
+
     render();
   });
+
   conn.on("close",updateStatus);
 }
 
 function broadcast(msg){
   connections.forEach(c=>{if(c.open)c.send(msg);});
+}
+
+function broadcastExcept(originConn, msg) {
+  connections.forEach(c => {
+    if (c !== originConn && c.open) {
+      c.send(msg);
+    }
+  });
 }
 function updateStatus(){
   document.getElementById("status").innerText="Peers: "+knownPeers.size;
