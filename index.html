@@ -32,46 +32,46 @@ button{
 
 <div class="app">
 
-<!-- LEFT PANEL -->
-<div class="left">
-  <h3>👤 Profile</h3>
-  <b>User:</b> <span id="username"></span>
-  <h4>Peer ID</h4>
-  <div id="myid" class="box"></div>
+  <!-- LEFT PANEL -->
+  <div class="left">
+    <h3>👤 Profile</h3>
+    <b>User:</b> <span id="username"></span>
+    <h4>Peer ID</h4>
+    <div id="myid" class="box"></div>
 
-  <h3>🌐 Connect</h3>
-  <input id="peerid" placeholder="Peer ID">
-  <button onclick="connect()">Connect</button>
+    <h3>🌐 Connect</h3>
+    <input id="peerid" placeholder="Peer ID">
+    <button onclick="connect()">Connect</button>
 
-  <h3>💾 Profile</h3>
-  <button onclick="downloadProfile()">Export</button>
-  <input type="file" onchange="importProfile(event)">
+    <h3>💾 Profile</h3>
+    <button onclick="downloadProfile()">Export</button>
+    <input type="file" onchange="importProfile(event)">
 
-  <h3>⏰ Time</h3>
-  <div id="clock" class="box"></div>
+    <h3>⏰ Time</h3>
+    <div id="clock" class="box"></div>
 
-  <div id="status"></div>
-</div>
+    <div id="status"></div>
+  </div>
 
-<!-- CENTER -->
-<div class="center">
-  <h2>🕊️ P2P Feed</h2>
-  <input id="tagSearch" placeholder="🔎 Search by #hashtag" oninput="render()">
-  <div id="feed"></div>
-</div>
+  <!-- CENTER -->
+  <div class="center">
+    <h2>🕊️ P2P Feed</h2>
+    <input id="tagSearch" placeholder="🔎 Search by #hashtag" oninput="render()">
+    <div id="feed"></div>
+  </div>
 
-<!-- RIGHT -->
-<div class="right">
-  <h3>✍️ New Post</h3>
-  <textarea id="msg" placeholder="Write something... #tag"></textarea>
-  <button onclick="post()">Post</button>
+  <!-- RIGHT -->
+  <div class="right">
+    <h3>✍️ New Post</h3>
+    <textarea id="msg" placeholder="Write something... #tag"></textarea>
+    <button onclick="post()">Post</button>
 
-  <h3>📊 Sort</h3>
-  <select id="sort" onchange="render()">
-    <option value="latest">Latest</option>
-    <option value="popular">Popular</option>
-  </select>
-</div>
+    <h3>📊 Sort</h3>
+    <select id="sort" onchange="render()">
+      <option value="latest">Latest</option>
+      <option value="popular">Popular</option>
+    </select>
+  </div>
 
 </div>
 
@@ -80,12 +80,18 @@ button{
    SECURITY & SETTINGS
 ----------------------------*/
 let clientID = localStorage.getItem("clientID");
-if(!clientID){ clientID = crypto.randomUUID(); localStorage.setItem("clientID", clientID); }
+if(!clientID){
+  clientID = crypto.randomUUID();
+  localStorage.setItem("clientID", clientID);
+}
 
 let lastPostTime = 0;
 let lastLikeTimes = [];
 const bannedWords = ["porn","xxx","sex","nazi","terror","rape"];
-function validText(text){ const t = text.toLowerCase(); return !bannedWords.some(w => t.includes(w)); }
+function validText(text){
+  const t = text.toLowerCase();
+  return !bannedWords.some(w => t.includes(w));
+}
 
 /* ---------------------------
    CLOCK
@@ -95,8 +101,13 @@ setInterval(()=>document.getElementById("clock").innerText=new Date().toLocaleTi
 /* ---------------------------
    HASHTAGS
 ----------------------------*/
-function extractTags(text){ return (text.match(/#[a-zA-Z0-9_äöüÄÖÜß]+/g)||[]).map(t=>t.toLowerCase()); }
-function searchTag(tag){ document.getElementById("tagSearch").value=tag; render(); }
+function extractTags(text){
+  return (text.match(/#[a-zA-Z0-9_äöüÄÖÜß]+/g)||[]).map(t=>t.toLowerCase());
+}
+function searchTag(tag){
+  document.getElementById("tagSearch").value=tag;
+  render();
+}
 
 /* ---------------------------
    P2P SETUP
@@ -110,11 +121,16 @@ let likeMap = {};
 let profile = { user: prompt("Username:") || "User"+Math.floor(Math.random()*1000) };
 document.getElementById("username").innerText = profile.user;
 
-peer.on("open", id=>{ document.getElementById("myid").innerText=id; knownPeers.add(id); });
+peer.on("open", id=>{
+  document.getElementById("myid").innerText=id;
+  knownPeers.add(id);
+  updateStatus();
+});
 peer.on("connection", conn=>setupConnection(conn));
 
 function connect(){
   const id=document.getElementById("peerid").value;
+  if(!id) return;
   const conn=peer.connect(id);
   setupConnection(conn);
 }
@@ -130,7 +146,9 @@ function setupConnection(conn){
     if(!msg||!msg.type) return;
 
     if(msg.type==="sync") msg.data.forEach(addPost);
-    if(msg.type==="post"){ if(validText(msg.data.text)) addPost(msg.data); }
+    if(msg.type==="post"){
+      if(validText(msg.data.text)) addPost(msg.data);
+    }
     if(msg.type==="like"){
       if(!likeMap[msg.postId]) likeMap[msg.postId]=new Set();
       if(!likeMap[msg.postId].has(msg.clientID)){
@@ -150,17 +168,27 @@ function setupConnection(conn){
   conn.on("close",updateStatus);
 }
 
-function broadcast(msg){ connections.forEach(c=>{if(c.open)c.send(msg);}); }
-function updateStatus(){ document.getElementById("status").innerText="Peers: "+knownPeers.size; }
+function broadcast(msg){
+  connections.forEach(c=>{if(c.open)c.send(msg);});
+}
+function updateStatus(){
+  document.getElementById("status").innerText="Peers: "+knownPeers.size;
+}
 
 /* ---------------------------
    POSTS + SURVEYS
 ----------------------------*/
 function post(parent=null){
   const now = Date.now();
-  if(now - lastPostTime < 10000){ alert("Wait a few seconds before posting again."); return; }
+  if(now - lastPostTime < 10000){
+    alert("Wait a few seconds before posting again.");
+    return;
+  }
   const txt=document.getElementById("msg").value.trim();
-  if(!txt||!validText(txt)){ alert("Post blocked by content filter."); return; }
+  if(!txt||!validText(txt)){
+    alert("Post blocked by content filter.");
+    return;
+  }
   lastPostTime = now;
 
   // Umfrage-Erkennung: jede Zeile mit ● = Option
@@ -191,8 +219,15 @@ function post(parent=null){
 function reply(id){
   const txt=prompt("Reply:");
   if(!txt||!validText(txt)) return;
-  const p={id:crypto.randomUUID(), text:txt, time:Date.now(), likes:0, parent:id,
-           user:profile.user, tags:extractTags(txt)};
+  const p={
+    id:crypto.randomUUID(),
+    text:txt,
+    time:Date.now(),
+    likes:0,
+    parent:id,
+    user:profile.user,
+    tags:extractTags(txt)
+  };
   addPost(p);
   broadcast({type:"post", data:p});
   render();
@@ -204,14 +239,18 @@ function reply(id){
 function like(id){
   const now = Date.now();
   lastLikeTimes = lastLikeTimes.filter(t => now - t < 60000);
-  if(lastLikeTimes.length>10){ alert("Like rate limit reached."); return; }
+  if(lastLikeTimes.length>10){
+    alert("Like rate limit reached.");
+    return;
+  }
   lastLikeTimes.push(now);
 
   if(!likeMap[id]) likeMap[id]=new Set();
   if(likeMap[id].has(clientID)) return;
   likeMap[id].add(clientID);
 
-  const p=feed.find(x=>x.id===id); if(p) p.likes = likeMap[id].size;
+  const p=feed.find(x=>x.id===id);
+  if(p) p.likes = likeMap[id].size;
   broadcast({type:"like", postId:id, clientID});
   render();
 }
@@ -232,7 +271,9 @@ function vote(surveyID, optionIndex){
 /* ---------------------------
    FEED
 ----------------------------*/
-function addPost(p){ if(!feed.find(x=>x.id===p.id)) feed.push(p); }
+function addPost(p){
+  if(!feed.find(x=>x.id===p.id)) feed.push(p);
+}
 
 /* ---------------------------
    RENDER
@@ -244,10 +285,13 @@ function render(){
   const searchTags = extractTags(document.getElementById("tagSearch").value);
   let roots=feed.filter(p=>!p.parent);
 
-  if(searchTags.length) roots = roots.filter(p=>searchTags.every(t=>p.tags.includes(t)));
+  if(searchTags.length)
+    roots = roots.filter(p=>searchTags.every(t=>p.tags.includes(t)));
 
-  if(document.getElementById("sort").value==="popular") roots.sort((a,b)=>b.likes-a.likes);
-  else roots.sort((a,b)=>b.time-a.time);
+  if(document.getElementById("sort").value==="popular")
+    roots.sort((a,b)=>b.likes-a.likes);
+  else
+    roots.sort((a,b)=>b.time-a.time);
 
   roots.forEach(p=>f.appendChild(renderPost(p,0)));
 }
@@ -270,7 +314,7 @@ function renderPost(p,level){
     });
   }
 
-  // Likes + Reply (immer sichtbar)
+  // Likes + Reply
   html += `<div class="small">
     ${new Date(p.time).toLocaleString()} · ❤️ ${p.likes}
     <span class="like" onclick="like('${p.id}')">Like</span>
@@ -279,14 +323,146 @@ function renderPost(p,level){
 
   d.innerHTML = html;
 
-  // Render Kommentare rekursiv
-  feed.filter(x=>x.parent===p.id)
-      .sort((a,b)=>a.time-b.time)
-      .forEach(c=>d.appendChild(renderPost(c,level+1)));
+  // Kommentare rekursiv
+  feed
+    .filter(x=>x.parent===p.id)
+    .sort((a,b)=>a.time-b.time)
+    .forEach(c=>d.appendChild(renderPost(c,level+1)));
 
   return d;
 }
 
+/* ---------------------------
+   PROFILE EXPORT OBJECT
+----------------------------*/
+function buildProfileExport(){
+  const ownPosts = feed
+    .filter(p => p.user === profile.user)
+    .map(p => ({
+      id: p.id,
+      text: p.text,
+      time: p.time,
+      likes: p.likes
+    }));
+
+  const peers = Array.from(knownPeers);
+
+  return {
+    user: profile.user,
+    clientID: clientID,
+    peers: peers,
+    posts: ownPosts
+  };
+}
+
+/* ---------------------------
+   SIGNATURE (INTEGRITY)
+----------------------------*/
+async function signData(str){
+  const enc = new TextEncoder().encode(str + clientID);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", enc);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashString = hashArray.map(b => String.fromCharCode(b)).join("");
+  return btoa(hashString); // Base64
+}
+
+/* ---------------------------
+   PROFILE EXPORT
+----------------------------*/
+async function downloadProfile(){
+  const payload = buildProfileExport();
+  const json = JSON.stringify(payload);
+  const signature = await signData(json);
+
+  const wrapped = {
+    payload: payload,
+    signature: signature
+  };
+
+  const blob = new Blob([JSON.stringify(wrapped, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "profile.secure.json";
+  a.click();
+
+  URL.revokeObjectURL(url);
+}
+
+/* ---------------------------
+   PROFILE IMPORT
+----------------------------*/
+async function importProfile(event){
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      const wrapped = JSON.parse(e.target.result);
+
+      if (!wrapped.payload || !wrapped.signature) {
+        alert("Ungültiges Profilformat.");
+        return;
+      }
+
+      const json = JSON.stringify(wrapped.payload);
+      const expectedSig = await signData(json);
+
+      if (expectedSig !== wrapped.signature) {
+        alert("Datei wurde verändert oder gehört zu einem anderen Client.");
+        return;
+      }
+
+      const data = wrapped.payload;
+
+      if (!data.user) {
+        alert("Ungültiges Profil (kein Benutzername).");
+        return;
+      }
+
+      // Profil übernehmen
+      profile.user = data.user;
+      document.getElementById("username").innerText = profile.user;
+
+      // bekannte Peers übernehmen
+      if (Array.isArray(data.peers)) {
+        data.peers.forEach(id => knownPeers.add(id));
+        updateStatus();
+      }
+
+      // eigene Posts in den Feed einfügen (ohne Duplikate)
+      if (Array.isArray(data.posts)) {
+        data.posts.forEach(p => {
+          if (!feed.find(x => x.id === p.id)) {
+            feed.push({
+              id: p.id,
+              text: p.text,
+              time: p.time,
+              likes: p.likes || 0,
+              parent: null,
+              user: profile.user,
+              tags: extractTags(p.text)
+            });
+          }
+        });
+        render();
+      }
+
+      alert("Profil erfolgreich importiert.");
+    } catch (err) {
+      console.error(err);
+      alert("Fehler beim Import.");
+    }
+  };
+
+  reader.readAsText(file);
+}
+
+/* ---------------------------
+   INITIAL RENDER
+----------------------------*/
 render();
 </script>
 </body>
